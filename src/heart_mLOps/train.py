@@ -60,7 +60,9 @@ def train(data_path: Path, output_dir: Path, tracking_uri: str | None = None) ->
             report_path.write_text(json.dumps(classification_report(y_test, predictions, output_dict=True), indent=2), encoding="utf-8")
             mlflow.log_artifact(str(roc_path))
             mlflow.log_artifact(str(report_path))
-            mlflow.sklearn.log_model(model, artifact_path="model")
+            mlflow.sklearn.log_model(sk_model=model,
+    name="model",
+    input_example=input_example,)
             summaries[name] = metrics
             fitted[name] = model
     # Recall is selected as the primary selection metric because missed positive cases

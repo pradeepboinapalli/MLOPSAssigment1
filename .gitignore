@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+mlruns/
+artifacts/heart_disease_model.joblib
+artifacts/roc_*.png
+artifacts/report_*.json
+artifacts/training_summary.json
+artifacts/eda/
+screenshots/
+reports/*.pdf

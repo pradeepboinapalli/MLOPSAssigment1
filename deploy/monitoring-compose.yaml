@@ -1,0 +1,24 @@
+services:
+  heart-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: heart-disease-api:local
+    ports: ["8000:8000"]
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on: [heart-api]
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: assignment-local-only
+    volumes:
+      - ./grafana/heart-api-dashboard.json:/var/lib/grafana/dashboards/heart-api.json:ro
+      - ./grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./grafana/dashboard-provider.yml:/etc/grafana/provisioning/dashboards/provider.yml:ro
+    depends_on: [prometheus]

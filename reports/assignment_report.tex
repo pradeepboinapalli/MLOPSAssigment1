@@ -1,0 +1,284 @@
+\documentclass[10pt]{article}
+\usepackage[margin=0.72in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{booktabs,tabularx,array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,urlcolor=blue!55!black}
+\definecolor{navy}{HTML}{16324F}
+\definecolor{teal}{HTML}{167D8D}
+\definecolor{light}{HTML}{EAF2F5}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small MLOps Assignment 01 | Heart Disease}
+\fancyhead[R]{\small AIMLCZG523}
+\fancyfoot[C]{\thepage\ / 10}
+\setlength{\headheight}{14pt}
+\setlist[itemize]{nosep,leftmargin=1.3em}
+\setlist[enumerate]{nosep,leftmargin=1.5em}
+\newcommand{\sectiontitle}[1]{\vspace*{0.15in}{\Large\bfseries\color{navy}#1}\par\vspace{0.08in}\hrule\vspace{0.16in}}
+\newcommand{\callout}[1]{\noindent\colorbox{light}{\parbox{\dimexpr\linewidth-2\fboxsep}{#1}}}
+\begin{document}
+
+% Page 1
+\thispagestyle{fancy}
+\vspace*{0.55in}
+{\color{teal}\large MACHINE LEARNING OPERATIONS \hfill ASSIGNMENT 01}\par
+\vspace{0.35in}
+{\Huge\bfseries\color{navy}From Clinical Tables to a\par Reproducible Prediction API}\par
+\vspace{0.18in}
+{\Large UCI Heart Disease: end-to-end MLOps implementation}\par
+\vspace{0.45in}
+\begin{tabular}{@{}ll@{}}
+Course & AIMLCZG523 -- MLOps \\
+Assignment & Experimental Learning Assignment 01 \\
+Student & \rule{2.9in}{0.4pt} \\
+ID & \rule{2.9in}{0.4pt} \\
+Date & 6 October 2026 \\
+Repository & Add your GitHub URL after publishing \\
+\end{tabular}
+\vspace{0.5in}
+
+\callout{\textbf{Educational-use notice.} This model is a classroom demonstration built from a small, historical dataset. It is not validated for diagnosis, triage, screening decisions, or patient care.}
+
+\vspace{0.38in}
+\sectiontitle{Executive summary}
+This project implements a repeatable workflow over the four processed UCI hospital tables supplied with the assignment. A preparation script converts the original ordinal `num` field into a binary outcome, preserves site for descriptive analysis, and leaves predictor gaps for pipeline imputation. The final table contains \textbf{920 labeled records}: 411 without and 509 with the historical disease label.
+
+The modeling workflow compares class-weighted Logistic Regression and Random Forest using a stratified 80/20 split and five-fold stratified cross-validation on the development partition. Mean cross-validation recall selects the final model; Random Forest was selected. On the holdout split, Random Forest achieved 85.9\% accuracy, 90.2\% recall, and 0.925 ROC-AUC. Logistic Regression achieved 83.7\% accuracy, 86.3\% recall, and 0.908 ROC-AUC.
+
+The selected fitted preprocessing-plus-classification pipeline is serialized for reuse, logged with MLflow, served through FastAPI, and packaged for Docker. Tests, CI workflow, Kubernetes manifests, structured request logging, Prometheus metrics, and a Grafana dashboard are included. Local code checks passed. Actual cluster deployment, GitHub publication, screenshots, and video evidence remain actions for the student's own account and runtime.
+
+\newpage
+% Page 2
+\sectiontitle{1. Problem, source, and data contract}
+The assignment asks for a binary heart-disease classifier based on the UCI Heart Disease collection. In the source, `num=0` indicates absence of angiographic disease and values 1--4 indicate presence. This implementation defines `target=1` whenever the raw value is greater than zero.
+
+The supplied `heart+disease/` folder contains four processed 14-column tables. Thirteen columns are model predictors; the fourteenth is the original outcome. The UCI documentation describes 303 Cleveland, 294 Hungarian, 123 Switzerland, and 200 VA Long Beach records. The combined table has the following input fields:
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Feature group & Fields \\
+\midrule
+Continuous & age, trestbps (resting blood pressure), chol (cholesterol), thalach (maximum heart rate), oldpeak \\
+Categorical codes & sex, cp (chest pain type), fbs, restecg, exang, slope, ca (vessels), thal \\
+Audit only & site (Cleveland, Hungary, Switzerland, VA Long Beach); never passed to the classifier \\
+Outcome & target (0 = absent, 1 = present) \\
+\bottomrule
+\end{tabularx}
+
+Question marks and `-9` sentinels are interpreted as missing values. Rows without a known outcome are excluded because a label cannot be imputed safely. Feature values remain missing in the released prepared table and are imputed only within model pipelines. This keeps imputation estimates inside each training fold and preserves information about missingness in the EDA summary.
+
+\vspace{0.12in}
+\textbf{Acquisition and repeatability.} Original source tables are preserved. `scripts/prepare_data.py` reads the provided source files and writes `data/processed/heart_disease.csv`. The UCI source page and DOI are linked in the Markdown report and README. If recreating this work from a clean checkout without supplied source files, download the official Heart Disease archive and place its processed files in `heart+disease/` before running the preparation script.
+
+\callout{\textbf{Scope choice.} Pooling all four supplied sources gives a useful 920-row MLOps exercise with realistic missingness. The site field is excluded from predictors to reduce site-identity shortcuts. Because the holdout is a random pooled split, it is not an external-hospital validation.}
+
+\newpage
+% Page 3
+\sectiontitle{2. Exploratory data analysis}
+The reproducible EDA script writes histograms, a correlation heatmap, target class balance, and `eda_summary.json` beneath `artifacts/eda/`. Summary statistics from the prepared dataset are:
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Source site & Records & Share \\
+\midrule
+Cleveland & 303 & 32.9\% \\
+Hungary & 294 & 32.0\% \\
+VA Long Beach & 200 & 21.7\% \\
+Switzerland & 123 & 13.4\% \\
+\midrule
+Target 0 & 411 & 44.7\% \\
+Target 1 & 509 & 55.3\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Missingness is uneven and clinically relevant.} `ca` is absent in 611 of 920 rows (66.4\%); `thal` is absent in 486 (52.8\%). `slope` is missing in 309 rows (33.6\%). Other missing counts are: `fbs` 90, `oldpeak` 62, `trestbps` 59, `thalach` 55, `exang` 55, `chol` 30, and `restecg` 2. Age, sex, chest pain type, and outcome are complete in these processed tables. The pipeline imputes the affected columns, but high missingness can reduce their usefulness and can make imputed values less representative.
+
+The target classes are moderately balanced, so stratification preserves their proportions during holdout and CV splits. The heatmap computes Pearson correlations on numeric encodings, including categorical codes; those coefficients are exploratory only and do not imply equally spaced category levels or causal relationships. The feature histograms show measurement ranges and unusual values that warrant verification before operational use.
+
+\vspace{0.12in}
+\textbf{Generated figures:} `artifacts/eda/feature_histograms.png`, `correlation_heatmap.png`, and `class_balance.png`. The Markdown report includes figure references for easy viewing alongside this PDF. Site counts and missingness are retained in `eda_summary.json` so the analysis can be recreated and checked without manual chart edits.
+
+\callout{Random splits can put each hospital's records in both training and test partitions. Therefore these EDA and test results describe interpolation within the pooled historical collection and do not establish performance on a new site or current patient population.}
+
+\newpage
+% Page 4
+\sectiontitle{3. Feature engineering and model design}
+The feature transformer is part of the serialized scikit-learn pipeline, rather than a separate notebook-only step. Continuous fields receive training-partition median imputation followed by standard scaling. Categorical codes receive most-frequent imputation followed by one-hot encoding with unseen-category tolerance. The hospital `site` variable and target are not predictors.
+
+\begin{center}
+\begin{tabular}{p{0.22\linewidth}p{0.34\linewidth}p{0.34\linewidth}}
+\toprule
+Design item & Logistic Regression & Random Forest \\
+\midrule
+Imbalance & `class\_weight=balanced` & `class\_weight=balanced` \\
+Core setting & liblinear solver, up to 2,000 iterations & 300 trees; minimum leaf size 2 \\
+Randomness & seed 42 & seed 42; all available CPU workers \\
+Preprocessing & same imputer, scaler, and one-hot transformer & same imputer, scaler, and one-hot transformer \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Evaluation procedure.} A stratified 20\% holdout is reserved before model comparison. Five-fold stratified cross-validation is run on the remaining 80\%, using a shuffled splitter with seed 42. In each fold, the imputer, scaler, and encoder are fitted only on that fold's training data. The development procedure logs mean accuracy, precision, recall, and ROC-AUC. Each fitted candidate is then evaluated on the same holdout once.
+
+The primary model-selection metric is mean CV recall; mean CV ROC-AUC breaks ties. Recall is emphasized because the assignment frames a health-risk prediction problem, where false negatives merit attention. This does not establish a clinically appropriate operating point: no clinical utility analysis, cost model, or threshold optimization was performed. The decision threshold remains 0.5.
+
+\textbf{Reproducibility controls.} Splitter and estimator seeds are fixed; feature names and order are centralized in `schema.py`; the entire preprocessing-plus-model pipeline is serialized. `requirements.txt` pins direct dependency versions. EDA and training outputs are produced by scripts and do not depend on hidden notebook state.
+
+\newpage
+% Page 5
+\sectiontitle{4. Model comparison and selection}
+The two candidates produce similar mean cross-validation accuracy, while Random Forest has higher CV recall. On the stratified holdout, Random Forest also yields the highest recall and ROC-AUC of the two candidates.
+
+\begin{center}
+\small
+\begin{tabular}{lrrrrrrrr}
+\toprule
+& \multicolumn{4}{c}{5-fold CV mean} & \multicolumn{4}{c}{Holdout} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Model & Acc. & Prec. & Recall & AUC & Acc. & Prec. & Recall & AUC \\
+\midrule
+Logistic Regression & .8003 & .8328 & .8058 & .8847 & .8370 & .8462 & .8627 & .9084 \\
+Random Forest & .7990 & .8156 & .8303 & .8837 & .8587 & .8519 & .9020 & .9247 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Random Forest is selected because its mean CV recall is 0.8303 versus 0.8058 for Logistic Regression. The holdout is consistent with that choice: Random Forest recall is 0.9020 compared with 0.8627, while its accuracy is 0.8587 compared with 0.8370. Its holdout ROC-AUC is 0.9247. Logistic Regression's CV precision is higher (0.8328 versus 0.8156), showing the usual precision-recall trade-off rather than universal dominance.
+
+These point estimates are based on a single random split of a modest, historical dataset. No confidence intervals or site-held-out results are included. AUC summarizes ranking over thresholds, not calibration or clinical benefit. A high recall in this data should not be taken to mean the API can safely rule out disease. The system returns the probability associated with the predicted class and positive-class probability as model scores, not as calibrated individual medical risk.
+
+\vspace{0.12in}
+\textbf{Tracked artifacts.} MLflow stores parameters, CV and holdout metrics, ROC plots, JSON classification reports, and the candidate sklearn model for each run. The final model selected by the written CV rule is exported as `artifacts/heart_disease_model.joblib`; its comparison is saved to `artifacts/training_summary.json`.
+
+\callout{Selection is based on development-fold results. The holdout metrics are reported for final performance context and are not used to tune model settings or the 0.5 threshold.}
+
+\newpage
+% Page 6
+\sectiontitle{5. Experiment tracking, CI, and automated tests}
+\textbf{MLflow.} The experiment is named `uci-heart-disease-four-site`; each candidate has its own run. Logged parameters include model name, feature count, fold count, holdout fraction, and seed. Logged metrics include fold-mean accuracy, precision, recall, ROC-AUC, and holdout metrics. Run artifacts include a ROC image, classification report JSON, and serialized model. Locally, `mlflow ui --backend-store-uri ./mlruns` opens the run comparison UI. Run data is local unless a remote tracking backend is deliberately configured.
+
+\textbf{Continuous integration.} `.github/workflows/ci.yml` is configured for pushes, pull requests, and manual runs. It checks out the repository, configures Python 3.11, installs pinned requirements, runs Ruff, rebuilds the processed table and EDA, executes pytest, trains both candidates, and uploads artifacts even if later steps fail. An error in lint, preparation, tests, or training fails the workflow. The workflow file is ready to publish; no GitHub run or screenshot is claimed because no repository URL was supplied.
+
+\textbf{Automated tests.} Five tests cover: binary target and schema invariants; all four source sites and retained predictor missingness; fitting both preprocessing/model pipelines with missing features; finite probability outputs; successful API inference response; and request rejection when unknown keys are present. Local execution returned \textbf{5 passed}. Ruff returned \textbf{All checks passed}. These checks establish code-path behavior in this environment, not the availability of a remote Actions runner.
+
+\textbf{Artifact reproducibility.} The preparation script uses relative paths rooted at the project folder and never changes original data. CI regenerates derived data rather than relying on an unstated local copy. The README contains clean setup commands. A fresh checkout still needs Python package installation and the supplied/downloaded source tables.
+
+\vspace{0.15in}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Pipeline stage & Evidence/output \\
+\midrule
+Lint & Ruff check over source, scripts, and tests \\
+Data and EDA & processed CSV, summary JSON, and plots \\
+Unit tests & pytest result in workflow logs \\
+Training & MLflow local store and serialized chosen pipeline \\
+Artifacts & uploaded from each workflow execution \\
+\bottomrule
+\end{tabularx}
+
+\newpage
+% Page 7
+\sectiontitle{6. Model API and container packaging}
+FastAPI exposes a narrow JSON interface. The request schema requires 13 numeric feature fields and rejects extra keys. `POST /predict` returns a binary class, label, predicted-class confidence, positive-class probability, and fixed threshold. `GET /health` reports whether the serialized model has loaded; inference returns HTTP 503 if it has not. `GET /metrics` exposes a Prometheus-compatible request counter and model-loaded gauge. `/docs` is generated for local inspection.
+
+\textbf{Example input:}
+\begin{verbatim}
+{"age":63,"sex":1,"cp":1,"trestbps":145,"chol":233,
+ "fbs":1,"restecg":2,"thalach":150,"exang":0,
+ "oldpeak":2.3,"slope":3,"ca":0,"thal":6}
+\end{verbatim}
+
+The service loads the same serialized sklearn pipeline used during evaluation, so missing-value treatment and category encoding remain consistent. Access logs include method, path, response status, and elapsed time. They deliberately exclude submitted clinical feature values. The health response is an operational readiness signal, not an assurance about model validity.
+
+\textbf{Container.} `Dockerfile` uses Python 3.11 slim, installs pinned dependencies, copies application source and trained model, exposes port 8000, and configures a health check. `compose.yaml` binds the API to localhost port 8000. Once built, use `docker compose up --build`, call `/health` and `/predict`, and stop with `docker compose down`. This container image expects `artifacts/heart_disease_model.joblib` to exist at build time, so training must occur first.
+
+\textbf{Reproducible setup commands (PowerShell):}
+\begin{verbatim}
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+$env:PYTHONPATH = "src"
+python scripts/prepare_data.py
+python scripts/eda.py
+python -m heart_mLOps.train
+docker compose up --build
+\end{verbatim}
+
+The output scores are educational model scores, not medical probabilities. The application description, report, and README state that limitation directly.
+
+\newpage
+% Page 8
+\sectiontitle{7. Deployment architecture and local Kubernetes}
+\begin{center}
+\fbox{\begin{minipage}{0.91\linewidth}\centering
+\textbf{Data} \quad $\rightarrow$ \quad \textbf{Preparation + EDA} \quad $\rightarrow$ \quad \textbf{CV training}\\[0.08in]
+\textbf{MLflow runs} \quad $\leftarrow$ \quad candidate metrics and artifacts \qquad \\
+\textbf{Selected pipeline} \quad $\rightarrow$ \quad \textbf{Docker image} \quad $\rightarrow$ \quad \textbf{Kubernetes Deployment (2 pods)}\\[0.08in]
+\textbf{Client} \quad $\rightarrow$ \quad \textbf{LoadBalancer Service} \quad $\rightarrow$ \quad \textbf{FastAPI /predict}\\[0.08in]
+\textbf{API logs} $\rightarrow$ logs; \quad \textbf{/metrics} $\rightarrow$ Prometheus $\rightarrow$ Grafana\\[0.08in]
+\textbf{GitHub Actions:} lint $\rightarrow$ data/EDA $\rightarrow$ tests $\rightarrow$ training $\rightarrow$ artifacts
+\end{minipage}}
+\end{center}
+
+The Kubernetes manifest defines a two-replica Deployment, resource requests and limits, readiness and liveness probes, and a Service of type LoadBalancer. The image tag `heart-disease-api:local` is intended for Docker Desktop Kubernetes or Minikube. On Minikube, build or load the image into Minikube before applying the manifest. On Docker Desktop Kubernetes, ensure the local image is available to its daemon.
+
+\textbf{Example local steps:}
+\begin{enumerate}
+\item Build and test the Docker image and API locally.
+\item For Minikube, run `minikube image load heart-disease-api:local`.
+\item Apply `deploy/kubernetes/deployment.yaml` and wait for rollout readiness.
+\item Inspect pods and service, then port-forward the service to localhost for requests.
+\item Save actual output and screenshots as deployment evidence.
+\end{enumerate}
+
+A managed-cloud public endpoint requires a configured cloud cluster, credentials, registry, and provider-managed LoadBalancer. No such credentials or cluster were included with the assignment files. The manifest is supplied, but a live deployment is not claimed. A LoadBalancer address may remain pending on a local cluster until a tunnel or local implementation is configured.
+
+\newpage
+% Page 9
+\sectiontitle{8. Monitoring, logging, and operational boundaries}
+The API logs each request's HTTP method, path, status code, and duration in milliseconds. It does not log feature values. `/metrics` exposes a process-level counter and a gauge indicating whether the model is loaded. `deploy/monitoring-compose.yaml` starts the API, Prometheus, and Grafana. Prometheus scrapes every 15 seconds; Grafana includes a sample dashboard for requests handled and model availability.
+
+The monitoring setup is intentionally small for an assignment demonstration. It does not include persistent storage, alert rules, latency histograms, error-rate panels, authentication, TLS, rate limits, multi-process counter aggregation, or automated model-drift detection. Grafana's local demo password in compose must not be reused or exposed in a public deployment. Before any production use, secrets and access policies must be handled by the deployment platform.
+
+\textbf{Deployment proof status.} The repository contains the Docker, compose, monitoring, and Kubernetes assets. The local automated code tests and lint check passed. This environment did not provide an active Kubernetes context. Docker Engine access could not be confirmed in the sandbox. Therefore container build/run proof, live service URL, deployment screenshots, MLflow UI screenshot, remote CI screenshot, and a walkthrough recording remain uncollected and are explicitly listed in `reports/evidence_checklist.md`.
+
+\textbf{Operational checks for the submission owner:}
+\begin{itemize}
+\item Verify the model readiness endpoint before allowing traffic.
+\item Send a known sample request; save both request and response evidence.
+\item Verify two healthy replicas and reachable service/port-forward.
+\item Confirm Prometheus target is up and dashboard values respond to requests.
+\item Keep model artifact, code revision, dependency versions, and training summary together.
+\end{itemize}
+
+\textbf{Monitoring interpretation.} An increase in request count proves traffic was observed by that API process; it does not measure unique patients or successful outcomes. Model-loaded indicates artifact availability only. Meaningful production monitoring would require validated service objectives, privacy review, site and subgroup evaluation, data quality checks, and a model governance process.
+
+\newpage
+% Page 10
+\sectiontitle{9. Limitations, integrity, and submission checklist}
+This dataset is small, historical, and drawn from patients assessed in clinical settings. The outcome is a historical angiographic label, not future incidence or a present-day risk endpoint. Missingness is extensive for `ca` and `thal`, and values and clinical practice may differ across hospitals. Pooled random splitting is not an external validation design. Neither reported AUC nor confidence scores establish probability calibration, fairness, safety, or benefit.
+
+No clinical decisions should be made from this classifier. A responsible continuation would define an intended use with clinicians, validate prospectively on a representative external population, pre-specify operating criteria, assess calibration and subgroup performance, quantify uncertainty, and obtain appropriate ethics, privacy, and regulatory review. Production infrastructure would need authenticated access, encryption, secret management, durable logging/monitoring, incident response, and human oversight.
+
+\textbf{Academic integrity and authorship.} The supplied code and analysis are a working scaffold for the student's assignment. The course asks students to demonstrate their own understanding and prohibits copied submissions. Review and personalize the implementation, explain the selected data and evaluation decisions, inspect the original UCI documentation, and follow the institution's disclosure rules before submission. Do not claim an unperformed deployment, screenshot, recording, or remote workflow run.
+
+\textbf{Final submission checklist:}
+\begin{itemize}
+\item Add student name/ID and publish the repository from the student's own GitHub account.
+\item Run clean setup, CI workflow, Docker build/API sample, Kubernetes deployment, and monitoring.
+\item Add actual GitHub, Docker/API, cluster, MLflow, and Grafana screenshots to `screenshots/`.
+\item Record the requested brief end-to-end video and link it from the report.
+\item Attach the actual public URL or clear local access steps and include the observed deployment status.
+\item Recheck report metrics against `artifacts/training_summary.json` and retain code/run evidence.
+\end{itemize}
+
+\textbf{References.} UCI Machine Learning Repository, \emph{Heart Disease}, DOI \href{https://doi.org/10.24432/C52P4X}{10.24432/C52P4X}; supplied `heart-disease.names` documentation. The source credits investigators Andras Janosi, William Steinbrunn, Matthias Pfisterer, and Robert Detrano and requests acknowledgement when publishing results.
+
+\end{document}

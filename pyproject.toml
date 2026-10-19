@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heart-disease-mlops"
+version = "1.0.0"
+description = "Reproducible MLOps assignment for the UCI Heart Disease data"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.115.12", "uvicorn[standard]==0.34.2", "pandas==2.2.3",
+  "numpy==2.2.5", "scikit-learn==1.6.1", "matplotlib==3.10.1", "seaborn==0.13.2",
+  "mlflow==2.22.0", "joblib==1.4.2", "pydantic==2.11.4"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

@@ -18,12 +18,17 @@ from sklearn.metrics import (accuracy_score, classification_report,
 from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 
 from .model import candidate_models
-from .schema import FEATURES, TARGET
+from heart_mLOps.schema  import FEATURES, TARGET
 
 
 def train(data_path: Path, output_dir: Path, tracking_uri: str | None = None) -> dict:
     data = pd.read_csv(data_path)
     X, y = data[FEATURES], data[TARGET].astype(int)
+    print("Missing values per feature:")
+    print(X.isnull().sum())
+
+    print("\nFeature data types:")
+    print(X.dtypes)
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
@@ -38,7 +43,9 @@ def train(data_path: Path, output_dir: Path, tracking_uri: str | None = None) ->
     for name, model in candidate_models().items():
         with mlflow.start_run(run_name=name):
             mlflow.log_params({"model": name, "cv_folds": 5, "test_size": 0.2, "seed": 42, "feature_count": len(FEATURES)})
+            print(f"[{name}] Starting 5-fold cross-validation...", flush=True)
             scores = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring, n_jobs=1)
+            print(f"[{name}] Cross-validation completed.", flush=True)
             cv_metrics = {f"cv_{metric}": float(scores[f"test_{metric}"].mean()) for metric in scoring}
             model.fit(X_train, y_train)
             probabilities = model.predict_proba(X_test)[:, 1]
@@ -58,12 +65,17 @@ def train(data_path: Path, output_dir: Path, tracking_uri: str | None = None) ->
             plt.close()
             report_path = output_dir / f"report_{name}.json"
             report_path.write_text(json.dumps(classification_report(y_test, predictions, output_dict=True), indent=2), encoding="utf-8")
+            print(f"[{name}] Logging ROC curve...", flush=True)
             mlflow.log_artifact(str(roc_path))
+            print(f"[{name}] Logging classification report...", flush=True)
             mlflow.log_artifact(str(report_path))
+            print(f"[{name}] Artifact logging completed.", flush=True)
             input_example = X_train.head(5)
+            print("Starting MLflow model logging...", flush=True)
             mlflow.sklearn.log_model(sk_model=model,
             artifact_path="model",
             input_example=input_example,)
+            print("MLflow model logging completed.", flush=True)
             summaries[name] = metrics
             fitted[name] = model
     # Recall is selected as the primary selection metric because missed positive cases

@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import joblib
@@ -16,9 +18,31 @@ from heart_mLOps.schema import FEATURES
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("heart_api")
 MODEL_PATH = Path(os.getenv("MODEL_PATH", "artifacts/heart_disease_model.joblib"))
-app = FastAPI(title="Heart Disease Risk Classifier", version="1.0.0", description="Educational prediction service; not a medical device.")
 model = None
 request_count = 0
+
+
+def load_model() -> None:
+    global model
+    if MODEL_PATH.is_file():
+        model = joblib.load(MODEL_PATH)
+        logger.info("model_loaded path=%s", MODEL_PATH)
+    else:
+        logger.error("model_missing path=%s", MODEL_PATH)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
+    load_model()
+    yield
+
+
+app = FastAPI(
+    title="Heart Disease Risk Classifier",
+    version="1.0.0",
+    description="Educational prediction service; not a medical device.",
+    lifespan=lifespan,
+)
 
 
 class PatientFeatures(BaseModel):
@@ -36,16 +60,6 @@ class PatientFeatures(BaseModel):
     slope: float
     ca: float
     thal: float
-
-
-@app.on_event("startup")
-def load_model() -> None:
-    global model
-    if MODEL_PATH.is_file():
-        model = joblib.load(MODEL_PATH)
-        logger.info("model_loaded path=%s", MODEL_PATH)
-    else:
-        logger.error("model_missing path=%s", MODEL_PATH)
 
 
 @app.middleware("http")

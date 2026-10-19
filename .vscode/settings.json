@@ -1,3 +1,9 @@
 {
-    "git.ignoreLimitWarning": true
+    "git.ignoreLimitWarning": true,
+    "files.associations": {
+        "**/PKG-INFO": "plaintext"
+    },
+    "python.analysis.exclude": [
+        "**/src/heart_disease_mlops.egg-info/**"
+    ]
 }

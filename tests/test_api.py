@@ -23,3 +23,15 @@ def test_prediction_rejects_unknown_fields():
     patient = {"age": 50, "extra": 1}
     response = TestClient(api.app).post("/predict", json=patient)
     assert response.status_code == 422
+
+
+def test_model_loads_during_lifespan(monkeypatch, tmp_path):
+    model_path = tmp_path / "model.joblib"
+    model_path.touch()
+    loaded_model = object()
+    monkeypatch.setattr(api, "MODEL_PATH", model_path)
+    monkeypatch.setattr(api.joblib, "load", lambda _: loaded_model)
+    monkeypatch.setattr(api, "model", None)
+
+    with TestClient(api.app):
+        assert api.model is loaded_model

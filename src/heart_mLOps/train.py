@@ -62,7 +62,7 @@ def train(data_path: Path, output_dir: Path, tracking_uri: str | None = None) ->
             mlflow.log_artifact(str(report_path))
             input_example = X_train.head(5)
             mlflow.sklearn.log_model(sk_model=model,
-            name="model",
+            artifact_path="model",
             input_example=input_example,)
             summaries[name] = metrics
             fitted[name] = model

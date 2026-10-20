@@ -8,3 +8,4 @@ seaborn==0.13.2
 mlflow==2.22.0
 joblib==1.4.2
 pydantic==2.11.4
+prometheus-client

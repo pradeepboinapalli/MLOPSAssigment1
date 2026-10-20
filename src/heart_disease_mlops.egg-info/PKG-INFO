@@ -13,3 +13,4 @@ Requires-Dist: seaborn==0.13.2
 Requires-Dist: mlflow==2.22.0
 Requires-Dist: joblib==1.4.2
 Requires-Dist: pydantic==2.11.4
+Requires-Dist: prometheus-client

@@ -4,7 +4,7 @@ services:
       context: ..
       dockerfile: Dockerfile
     image: heart-disease-api:local
-    ports: ["8000:8000"]
+    ports: ["8001:8000"]
   prometheus:
     image: prom/prometheus:v2.53.0
     ports: ["9090:9090"]
